@@ -1,8 +1,8 @@
 diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs
-index 193b4539c..fc392afcc 100644
+index 193b4539c..a3abfae70 100644
 --- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs
 +++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs
-@@ -1440,27 +1440,36 @@ namespace HordeServer.Jobs
+@@ -1440,27 +1440,35 @@ namespace HordeServer.Jobs
  
  			List<RpcAgentWorkspace> workspaces = new();
  
@@ -52,7 +52,7 @@ index 193b4539c..fc392afcc 100644
  
  			task.Workspace = workspaces.Last();
 diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs
-index fbcb0a768..f44239c80 100644
+index fbcb0a768..c90081f38 100644
 --- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs
 +++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs
 @@ -141,6 +141,65 @@ namespace HordeServer.VersionControl.Perforce

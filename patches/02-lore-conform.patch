@@ -56,7 +56,7 @@ index 516b040dc..eff31128a 100644
  			Dictionary<string, string> environment = ManagedProcess.GetCurrentEnvVars();
  			environment["UE_HORDE_JOB_DRIVER_TASK_ARG"] = $"-Task={Convert.ToBase64String(conformTask.ToByteArray())}";
 diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs
-index 93cf680e7..15eea82e1 100644
+index 93cf680e7..16d5c8ba3 100644
 --- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs
 +++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs
 @@ -11,6 +11,7 @@ using HordeServer.Agents;
@@ -75,7 +75,7 @@ index 93cf680e7..15eea82e1 100644
  
  							return LeaseAsync(new CreateLeaseOptions(leaseId, null, "Updating workspaces", null, null, log.Id, null, true, task));
  						}
-@@ -202,6 +204,29 @@ namespace HordeServer.Tasks
+@@ -202,6 +204,28 @@ namespace HordeServer.Tasks
  			return ReleaseConformLeaseAsync(leaseId, cancellationToken);
  		}
  
@@ -104,7 +104,7 @@ index 93cf680e7..15eea82e1 100644
  		/// <inheritdoc/>
  		public async Task<bool> GetWorkspacesAsync(IAgent agent, IList<RpcAgentWorkspace> workspaces, CancellationToken cancellationToken)
  		{
-@@ -210,6 +235,13 @@ namespace HordeServer.Tasks
+@@ -210,6 +234,13 @@ namespace HordeServer.Tasks
  			HashSet<AgentWorkspaceInfo> conformWorkspaces = await _poolService.GetWorkspacesAsync(agent, DateTime.UtcNow, buildConfig, cancellationToken);
  			foreach (AgentWorkspaceInfo conformWorkspace in conformWorkspaces)
  			{
@@ -118,7 +118,7 @@ index 93cf680e7..15eea82e1 100644
  				PerforceCluster? cluster = buildConfig.FindPerforceCluster(conformWorkspace.Cluster);
  				if (cluster == null || !await agent.TryAddWorkspaceMessageAsync(conformWorkspace, cluster, _perforceLoadBalancer, workspaces, cancellationToken))
  				{
-@@ -248,6 +280,12 @@ namespace HordeServer.Tasks
+@@ -248,6 +279,12 @@ namespace HordeServer.Tasks
  				HashSet<string> servers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
  				foreach (RpcAgentWorkspace workspace in workspaces)
  				{
