@@ -83,7 +83,9 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 	internal const int CurrentStateVersion = 1;
 	internal enum TransactionStatus { Clean = 0, Dirty = 1 }
 
-	internal record State(int Version, TransactionStatus Status, string Identifier, string RepositoryUrl, string Branch, string? Revision);
+	internal record State(int Version, TransactionStatus Status, string Identifier, string RepositoryUrl, string Branch, string? Revision, string? ViewHash);
+
+	private const string LoreMetadataDir = ".lore";
 
 	/// <inheritdoc/>
 	public DirectoryReference SyncDir { get; }
@@ -166,6 +168,9 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 		string branch = _options.Branch;
 		// The server stamps the Lore revision signature onto the workspace; sync to it. Empty syncs to the branch tip.
 		string? revision = String.IsNullOrEmpty(_options.Revision) ? null : _options.Revision;
+		IReadOnlyList<string> view = _options.AgentWorkspace.View;
+		// Hash the view filter so a changed view forces a fresh clone (the view is applied at clone time)
+		string? viewHash = view.Count > 0 ? ComputeViewHash(view) : null;
 
 		State? state = await LoadStateAsync(cancellationToken);
 		bool isDirty = state == null
@@ -173,11 +178,14 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 			|| state.Status == TransactionStatus.Dirty
 			|| state.Identifier != Identifier
 			|| !String.Equals(state.RepositoryUrl, url, StringComparison.Ordinal)
-			|| !DirectoryReference.Exists(SyncDir);
+			|| !String.Equals(state.ViewHash, viewHash, StringComparison.Ordinal)
+			|| !IsValidLoreWorkspace();
 
-		_logger.LogInformation("Lore sync: Url={Url} Branch={Branch} Revision={Revision} Dirty={Dirty}", url, branch, revision ?? "(tip)", isDirty);
+		_logger.LogInformation("Lore sync: Url={Url} Branch={Branch} Revision={Revision} View={ViewCount} Dirty={Dirty}",
+			url, branch, revision ?? "(tip)", view.Count, isDirty);
 
 		using LoreGlobalArgs global = CreateGlobalArgs();
+		await TryLoginAsync(global, cancellationToken);
 
 		if (isDirty)
 		{
@@ -186,9 +194,10 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 				FileUtils.ForceDeleteDirectory(SyncDir, usePosixFallback: true, _logger);
 			}
 			Directory.CreateDirectory(SyncDir.FullName);
-			await SaveStateAsync(new State(CurrentStateVersion, TransactionStatus.Dirty, Identifier, url, branch, revision), cancellationToken);
+			await SaveStateAsync(new State(CurrentStateVersion, TransactionStatus.Dirty, Identifier, url, branch, revision, viewHash), cancellationToken);
 
-			using LoreRepositoryCloneArgs cloneArgs = new() { RepositoryUrl = url };
+			string viewFilter = view.Count > 0 ? String.Join('\n', view) : String.Empty;
+			using LoreRepositoryCloneArgs cloneArgs = new() { RepositoryUrl = url, View = viewFilter };
 			Stopwatch timer = Stopwatch.StartNew();
 			_logger.LogInformation("Cloning {Url} into {Dir}...", url, SyncDir.FullName);
 			Check("clone", await Lore.RepositoryClone(global, cloneArgs).WaitAsync());
@@ -205,7 +214,7 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 		}
 
 		string? syncedRevision = await TryGetRevisionAsync(global, cancellationToken) ?? revision;
-		await SaveStateAsync(new State(CurrentStateVersion, TransactionStatus.Clean, Identifier, url, branch, syncedRevision), cancellationToken);
+		await SaveStateAsync(new State(CurrentStateVersion, TransactionStatus.Clean, Identifier, url, branch, syncedRevision, viewHash), cancellationToken);
 	}
 
 	/// <inheritdoc/>
@@ -233,12 +242,76 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 	{
 		using TelemetrySpan span = _tracer.StartActiveSpan($"{nameof(LoreMaterializer)}.{nameof(ConformAsync)}");
 
-		// Force a clean by discarding any persisted state - TODO: Check for better method (like force sync or something)
-		FileUtils.ForceDeleteFile(_stateFile);
-		await SyncAsync(IWorkspaceMaterializer.LatestChangeNumber, 0, new SyncOptions { RemoveUntracked = removeUntrackedFiles }, cancellationToken);
+		if (removeUntrackedFiles || !IsValidLoreWorkspace())
+		{
+			// Full conform, or no valid checkout: clean slate. The next sync re-materializes the workspace.
+			_logger.LogInformation("Conforming Lore workspace {Dir} (full clean)", SyncDir.FullName);
+			if (DirectoryReference.Exists(SyncDir))
+			{
+				FileUtils.ForceDeleteDirectory(SyncDir, usePosixFallback: true, _logger);
+			}
+			FileUtils.ForceDeleteFile(_stateFile);
+			return;
+		}
+
+		// Incremental conform: reset the existing checkout, discarding local changes and untracked files.
+		_logger.LogInformation("Removing untracked files from Lore workspace.");
+		using LoreGlobalArgs global = CreateGlobalArgs();
+		using LoreRevisionSyncArgs resetArgs = new() { Reset = true };
+		Check("conform reset", await Lore.RevisionSync(global, resetArgs).WaitAsync());
 	}
 
 	private LoreGlobalArgs CreateGlobalArgs() => new() { RepositoryPath = SyncDir.FullName, Offline = _options.Offline };
+
+	private bool IsValidLoreWorkspace() => DirectoryReference.Exists(SyncDir) && DirectoryReference.Exists(DirectoryReference.Combine(SyncDir, LoreMetadataDir));
+
+	private async Task TryLoginAsync(LoreGlobalArgs global, CancellationToken cancellationToken)
+	{
+		string? token = _options.AgentWorkspace.Ticket;
+		if (String.IsNullOrEmpty(token))
+		{
+			token = _options.AgentWorkspace.Password;
+		}
+		if (String.IsNullOrEmpty(token))
+		{
+			return;
+		}
+
+		using LoreAuthLoginWithTokenArgs loginArgs = new()
+		{
+			Token = token,
+			TokenType = "apikey",
+			RemoteUrl = NormalizeServerUrl(_options.AgentWorkspace.ServerAndPort ?? String.Empty),
+		};
+		Check("auth login", await Lore.AuthLoginWithToken(global, loginArgs).WaitAsync());
+	}
+
+	internal static string NormalizeServerUrl(string serverAndPort)
+	{
+		string value = serverAndPort.Trim();
+		int scheme = value.IndexOf("://", StringComparison.Ordinal);
+		if (scheme >= 0)
+		{
+			value = value[(scheme + 3)..];
+		}
+		int slash = value.IndexOf('/', StringComparison.Ordinal);
+		if (slash >= 0)
+		{
+			value = value[..slash];
+		}
+		int colon = value.IndexOf(':', StringComparison.Ordinal);
+		if (colon >= 0)
+		{
+			value = value[..colon];
+		}
+		return value;
+	}
+
+	private static string ComputeViewHash(IReadOnlyList<string> view)
+	{
+		byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(String.Join('\n', view)));
+		return Convert.ToHexString(hash).ToLowerInvariant();
+	}
 
 	private async Task<string?> TryGetRevisionAsync(LoreGlobalArgs global, CancellationToken cancellationToken)
 	{
@@ -320,15 +393,24 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 public class LoreMaterializerFactory(IServiceProvider serviceProvider) : IWorkspaceMaterializerFactory
 {
 	/// <inheritdoc/>
-	public Task<IWorkspaceMaterializer?> CreateMaterializerAsync(string name, RpcAgentWorkspace workspaceInfo, DirectoryReference workspaceDir, bool forAutoSdk, CancellationToken cancellationToken)
+	public async Task<IWorkspaceMaterializer?> CreateMaterializerAsync(string name, RpcAgentWorkspace workspaceInfo, DirectoryReference workspaceDir, bool forAutoSdk, CancellationToken cancellationToken)
 	{
 		if (name.Equals(LoreMaterializer.TypeName, StringComparison.OrdinalIgnoreCase))
 		{
-			ILogger<LoreMaterializer> logger = serviceProvider.GetRequiredService<ILogger<LoreMaterializer>>();
 			Tracer tracer = serviceProvider.GetRequiredService<Tracer>();
+
+			// AutoSDK content is Perforce-sourced regardless of the main VCS; delegate it to ManagedWorkspace (matches PerforceMaterializerFactory)
+			// TODO: Support AutoSDK from Lore
+			if (forAutoSdk)
+			{
+				ILogger<ManagedWorkspaceMaterializer> mwLogger = serviceProvider.GetRequiredService<ILogger<ManagedWorkspaceMaterializer>>();
+				return await ManagedWorkspaceMaterializer.CreateAsync(workspaceInfo, workspaceDir, true, false, tracer, mwLogger, cancellationToken);
+			}
+
+			ILogger<LoreMaterializer> logger = serviceProvider.GetRequiredService<ILogger<LoreMaterializer>>();
 			LoreMaterializerOptions options = LoreMaterializerOptions.FromMethodString(workspaceDir.FullName, workspaceInfo);
-			return Task.FromResult<IWorkspaceMaterializer?>(new LoreMaterializer(options, tracer, logger));
+			return new LoreMaterializer(options, tracer, logger);
 		}
-		return Task.FromResult<IWorkspaceMaterializer?>(null);
+		return null;
 	}
 }
