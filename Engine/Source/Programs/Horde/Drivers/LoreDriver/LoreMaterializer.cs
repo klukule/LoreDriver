@@ -55,15 +55,15 @@ public record LoreMaterializerOptions(string DirPath, RpcAgentWorkspace AgentWor
 	/// </summary>
 	public static LoreMaterializerOptions FromMethodString(string dirPath, RpcAgentWorkspace agentWorkspace)
 	{
-		string branch = "main";
+		string branch = LoreMaterializer.DefaultBranch;
 		bool offline = false;
 		if (!String.IsNullOrEmpty(agentWorkspace.Method))
 		{
 			NameValueCollection nameValues = HttpUtility.ParseQueryString(agentWorkspace.Method);
-			if (String.Equals(nameValues["name"], LoreMaterializer.TypeName, StringComparison.OrdinalIgnoreCase))
+			if (String.Equals(nameValues[LoreMaterializer.MethodNameKey], LoreMaterializer.TypeName, StringComparison.OrdinalIgnoreCase))
 			{
-				branch = nameValues["branch"] ?? branch;
-				offline = String.Equals(nameValues["offline"], "true", StringComparison.OrdinalIgnoreCase);
+				branch = nameValues[LoreMaterializer.MethodBranchKey] ?? branch;
+				offline = String.Equals(nameValues[LoreMaterializer.MethodOfflineKey], "true", StringComparison.OrdinalIgnoreCase);
 			}
 		}
 		return new LoreMaterializerOptions(dirPath, agentWorkspace, branch, offline);
@@ -80,12 +80,21 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 	/// </summary>
 	public const string TypeName = "Lore";
 
+	// Keys parsed from the workspace method string
+	internal const string MethodNameKey = "name";
+	internal const string MethodBranchKey = "branch";
+	internal const string MethodOfflineKey = "offline";
+
+	// Branch synced when the method string does not specify one
+	internal const string DefaultBranch = "main";
+
 	internal const int CurrentStateVersion = 1;
 	internal enum TransactionStatus { Clean = 0, Dirty = 1 }
 
 	internal record State(int Version, TransactionStatus Status, string Identifier, string RepositoryUrl, string Branch, string? Revision, string? ViewHash);
 
 	private const string LoreMetadataDir = ".lore";
+	private const string TokenTypeApiKey = "apikey";
 
 	/// <inheritdoc/>
 	public DirectoryReference SyncDir { get; }
@@ -284,7 +293,7 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 		using LoreAuthLoginWithTokenArgs loginArgs = new()
 		{
 			Token = token,
-			TokenType = "apikey",
+			TokenType = TokenTypeApiKey,
 			RemoteUrl = NormalizeServerUrl(_options.AgentWorkspace.ServerAndPort ?? String.Empty),
 		};
 		Check("auth login", await Lore.AuthLoginWithToken(global, loginArgs).WaitAsync());

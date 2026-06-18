@@ -31,7 +31,7 @@ namespace HordeServer.VersionControl.Lore
 		/// <inheritdoc/>
 		public async Task EnrichAsync(RpcAgentWorkspace workspace, AgentWorkspaceInfo workspaceInfo, IAgent agent, IJob job, CancellationToken cancellationToken)
 		{
-			if (!_buildConfig.CurrentValue.TryGetStream(job.StreamId, out StreamConfig? streamConfig) || !String.Equals(streamConfig.VCS, "Lore", StringComparison.OrdinalIgnoreCase))
+			if (!_buildConfig.CurrentValue.TryGetStream(job.StreamId, out StreamConfig? streamConfig) || !LoreUtils.IsLoreStream(streamConfig))
 			{
 				return;
 			}
@@ -42,13 +42,13 @@ namespace HordeServer.VersionControl.Lore
 				return;
 			}
 
-			string branch = String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName;
+			string branch = LoreUtils.GetBranch(streamConfig);
 
 			workspace.Cluster = cluster.Name;
 			workspace.ServerAndPort = cluster.ServerAndPort;
 			workspace.BaseServerAndPort = cluster.ServerAndPort;
 			workspace.Stream = streamConfig.RepositoryName ?? streamConfig.Name;
-			workspace.Method = $"name=lore&branch={branch}";
+			workspace.Method = LoreUtils.GetWorkspaceMethod(branch);
 
 			LoreCredentials? credentials = cluster.Credentials.FirstOrDefault();
 			workspace.UserName = credentials?.UserName;

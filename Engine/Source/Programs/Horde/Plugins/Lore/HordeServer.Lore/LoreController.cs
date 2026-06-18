@@ -86,7 +86,7 @@ namespace HordeServer
 			List<GetLoreStreamResponse> streams = new();
 			foreach (StreamConfig streamConfig in build.Streams)
 			{
-				if (!String.Equals(streamConfig.VCS, "Lore", StringComparison.OrdinalIgnoreCase))
+				if (!LoreUtils.IsLoreStream(streamConfig))
 				{
 					continue;
 				}
@@ -97,7 +97,7 @@ namespace HordeServer
 					Id = streamConfig.Id.ToString(),
 					Name = streamConfig.Name,
 					Cluster = cluster?.Name,
-					Branch = String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName,
+					Branch = LoreUtils.GetBranch(streamConfig),
 					Repository = streamConfig.RepositoryName,
 				});
 			}

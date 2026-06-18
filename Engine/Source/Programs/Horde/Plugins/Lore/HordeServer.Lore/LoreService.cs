@@ -33,7 +33,7 @@ namespace HordeServer.VersionControl.Lore
 		readonly ConcurrentDictionary<string, GrpcChannel> _channels = new(StringComparer.OrdinalIgnoreCase);
 
 		/// <inheritdoc/>
-		public string Name => "Lore";
+		public string Name => LoreUtils.VcsName;
 
 		/// <summary>
 		/// Constructor
@@ -71,8 +71,6 @@ namespace HordeServer.VersionControl.Lore
 			LoreClusterConfig cluster = _loreConfig.CurrentValue.FindClusterForStream(streamConfig) ?? throw new CommitCollectionException($"No Lore cluster configured for stream {streamConfig.Id}", null);
 			return _channels.GetOrAdd(cluster.ServerAndPort, addr => GrpcChannel.ForAddress(ToGrpcAddress(addr)));
 		}
-
-		internal string GetBranch(StreamConfig streamConfig) => String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName;
 
 		// lore://host:port -> http://host:port (gRPC over plaintext h2c for a no-TLS local server). Use https:// for a TLS-enabled Lore gRPC endpoint.
 		static string ToGrpcAddress(string serverAndPort)
@@ -114,7 +112,7 @@ namespace HordeServer.VersionControl.Lore
 			_thinClient = new LoreThinClientV1.ThinClientService.ThinClientServiceClient(channel);
 		}
 
-		string BranchName => _owner.GetBranch(_streamConfig);
+		string BranchName => LoreUtils.GetBranch(_streamConfig);
 		string RepositoryName => _streamConfig.RepositoryName ?? _streamConfig.Name;
 
 		// Resolves the repository id (by name) once and caches the gRPC header carrying it
