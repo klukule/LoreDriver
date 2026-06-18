@@ -1,0 +1,106 @@
+--- a/Engine/Source/Programs/Horde/Plugins/Compute/HordeServer.Compute/Protos/horde/tasks/conform_task.proto
++++ b/Engine/Source/Programs/Horde/Plugins/Compute/HordeServer.Compute/Protos/horde/tasks/conform_task.proto
+@@ -18,4 +18,7 @@
+ 
+ 	// Whether to remove any untracked files from the workspace. Ignored for workspaces sharing a common root directory.
+ 	bool RemoveUntrackedFiles = 3;
++
++	// Driver assembly the agent runs for this conform (eg. "LoreDriver"). Empty runs the standard JobDriver.
++	string Driver = 5;
+ }
+diff --git a/Engine/Source/Programs/Horde/Drivers/JobDriver/Execution/ConformExecutor.cs b/Engine/Source/Programs/Horde/Drivers/JobDriver/Execution/ConformExecutor.cs
+index a20fd8429..7876d72a9 100644
+--- a/Engine/Source/Programs/Horde/Drivers/JobDriver/Execution/ConformExecutor.cs
++++ b/Engine/Source/Programs/Horde/Drivers/JobDriver/Execution/ConformExecutor.cs
+@@ -52,6 +52,10 @@ namespace JobDriver.Execution
+ 			}
+ 		}
+ 
++		// True for workspaces conformed by the raw managed path (no materializer name, or the built-in ManagedWorkspace).
++		static bool IsRawManagedConform(string? materializerName)
++			=> String.IsNullOrEmpty(materializerName) || String.Equals(materializerName, ManagedWorkspaceMaterializer.TypeName, StringComparison.OrdinalIgnoreCase);
++
+ 		async Task ExecuteInternalAsync(CancellationToken cancellationToken)
+ 		{
+ 			_logger.LogInformation("Conforming, lease {LeaseId}", _leaseId);
+@@ -64,12 +68,15 @@ namespace JobDriver.Execution
+ 				bool isPerforceExecutor = _driverSettings.Executor.Equals(PerforceExecutor.Name, StringComparison.OrdinalIgnoreCase);
+ 				bool isWorkspaceExecutor = _driverSettings.Executor.Equals(WorkspaceExecutor.Name, StringComparison.OrdinalIgnoreCase);
+ 
++				// Workspaces with no materializer name, or the built-in ManagedWorkspace (whose ConformAsync is a stub
++				// handled by the raw path below), are conformed by PerforceExecutor.ConformAsync. Any other named
++				// materializer (Perforce, Lore, ...) is conformed through its own IWorkspaceMaterializer.ConformAsync.
+ 				List<RpcAgentWorkspace> managedWorkspaces = pendingWorkspaces
+-					.Where(x => !String.Equals(PerforceExecutor.GetMaterializerName(x.Method), PerforceExecutor.Name, StringComparison.OrdinalIgnoreCase))
++					.Where(x => IsRawManagedConform(PerforceExecutor.GetMaterializerName(x.Method)))
+ 					.ToList();
+ 
+ 				List<RpcAgentWorkspace> perforceWorkspaces = pendingWorkspaces
+-					.Where(x => String.Equals(PerforceExecutor.GetMaterializerName(x.Method), PerforceExecutor.Name, StringComparison.OrdinalIgnoreCase))
++					.Where(x => !IsRawManagedConform(PerforceExecutor.GetMaterializerName(x.Method)))
+ 					.ToList();
+ 				
+ 				// When using WorkspaceExecutor, only job options can override exact materializer to use
+diff --git a/Engine/Source/Programs/Horde/HordeAgent/Leases/Handlers/ConformHandler.cs b/Engine/Source/Programs/Horde/HordeAgent/Leases/Handlers/ConformHandler.cs
+index 516b040dc..eff31128a 100644
+--- a/Engine/Source/Programs/Horde/HordeAgent/Leases/Handlers/ConformHandler.cs
++++ b/Engine/Source/Programs/Horde/HordeAgent/Leases/Handlers/ConformHandler.cs
+@@ -37,7 +37,8 @@ namespace HordeAgent.Leases.Handlers
+ 			arguments.Add($"-LeaseId={leaseId}");
+ 			arguments.Add($"-WorkingDir={session.WorkingDir}");
+ 
+-			FileReference driverAssembly = FileReference.Combine(new DirectoryReference(AppContext.BaseDirectory), "JobDriver", "JobDriver.dll");
++			string driverName = String.IsNullOrEmpty(conformTask.Driver) ? "JobDriver" : conformTask.Driver;
++			FileReference driverAssembly = FileReference.Combine(new DirectoryReference(AppContext.BaseDirectory), driverName, $"{driverName}.dll");
+ 
+ 			Dictionary<string, string> environment = ManagedProcess.GetCurrentEnvVars();
+ 			environment["UE_HORDE_JOB_DRIVER_TASK_ARG"] = $"-Task={Convert.ToBase64String(conformTask.ToByteArray())}";
+diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs
+index 93cf680e7..3c6326489 100644
+--- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs
++++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Tasks/ConformTaskSource.cs
+@@ -11,6 +11,7 @@ using HordeServer.Agents;
+ using HordeServer.Agents.Pools;
+ using HordeServer.Jobs;
+ using HordeServer.Logs;
++using HordeServer.Streams;
+ using HordeServer.VersionControl.Perforce;
+ using HordeServer.Server;
+ using HordeServer.Utilities;
+@@ -174,6 +175,7 @@ namespace HordeServer.Tasks
+ 							ILog log = await _logCollection.AddAsync(JobId.Empty, leaseId, agent.SessionId, LogType.Json, cancellationToken: cancellationToken);
+ 							task.LogId = log.Id.ToString();
+ 							task.RemoveUntrackedFiles = agent.RequestFullConform;
++							task.Driver = GetConformDriver(agent, _buildConfig.CurrentValue) ?? String.Empty;
+ 
+ 							return LeaseAsync(new CreateLeaseOptions(leaseId, null, "Updating workspaces", null, null, log.Id, null, true, task));
+ 						}
+@@ -202,6 +204,29 @@ namespace HordeServer.Tasks
+ 			return ReleaseConformLeaseAsync(leaseId, cancellationToken);
+ 		}
+ 
++		// Pulls the conform driver from the workspace/stream definitions. Empty means the agent runs the standard JobDriver.
++		static string? GetConformDriver(IAgent agent, BuildConfig buildConfig)
++		{
++			foreach (StreamConfig stream in buildConfig.Streams)
++			{
++				if (!stream.AgentTypes.Values.Any(agentType => agent.IsInPool(agentType.Pool)))
++				{
++					continue;
++				}
++				if (!String.IsNullOrEmpty(stream.JobOptions.Driver))
++				{
++					return stream.JobOptions.Driver;
++				}
++				string? templateDriver = stream.Templates.Select(template => template.JobOptions.Driver).FirstOrDefault(driver => !String.IsNullOrEmpty(driver));
++				if (!String.IsNullOrEmpty(templateDriver))
++				{
++					return templateDriver;
++				}
++			}
++			return null;
++		}
++
+ 		/// <inheritdoc/>
+ 		public async Task<bool> GetWorkspacesAsync(IAgent agent, IList<RpcAgentWorkspace> workspaces, CancellationToken cancellationToken)
+ 		{

@@ -1,0 +1,54 @@
+diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/BuildConfig.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/BuildConfig.cs
+index ab1a19c60..f33d9a329 100644
+--- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/BuildConfig.cs
++++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/BuildConfig.cs
+@@ -544,6 +544,12 @@ namespace HordeServer
+ 		/// </summary>
+ 		public bool HealthCheck { get; set; }
+ 
++		/// <summary>
++		/// Treat the server as healthy without running the "p4 info" health check. Used when a non-Perforce VCS
++		/// (eg. a stand-in cluster fronting another provider) only needs to satisfy the dispatch path.
++		/// </summary>
++		public bool AssumeHealthy { get; set; }
++
+ 		/// <summary>
+ 		/// Whether to resolve the DNS entries and load balance between different hosts
+ 		/// </summary>
+diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceLoadBalancer.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceLoadBalancer.cs
+index ee8ffb464..2f71533aa 100644
+--- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceLoadBalancer.cs
++++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceLoadBalancer.cs
+@@ -672,6 +672,12 @@ namespace HordeServer.VersionControl.Perforce
+ 		/// </summary>
+ 		async Task UpdateHealthAsync(PerforceServerEntry entry, CancellationToken cancellationToken)
+ 		{
++			if (IsAssumeHealthy(entry))
++			{
++				await _serverListSingleton.UpdateAsync(x => UpdateHealth(x, entry.ServerAndPort, PerforceServerStatus.Healthy, "Assumed healthy (health check skipped)", DateTime.UtcNow), cancellationToken);
++				return;
++			}
++
+ 			ServerHealth health = await GetServerHealthViaP4InfoAsync(entry.BaseServerAndPort, _logger, cancellationToken);
+ 			if (entry.HealthCheckUrl != null)
+ 			{
+@@ -686,6 +692,19 @@ namespace HordeServer.VersionControl.Perforce
+ 			await _serverListSingleton.UpdateAsync(x => UpdateHealth(x, entry.ServerAndPort, health.Status, health.Detail, DateTime.UtcNow), cancellationToken);
+ 		}
+ 
++		// True when the server's cluster config marks it AssumeHealthy, so the "p4 info" probe is skipped.
++		bool IsAssumeHealthy(PerforceServerEntry entry)
++		{
++			foreach (PerforceCluster cluster in _buildConfig.CurrentValue.PerforceClusters)
++			{
++				if (String.Equals(cluster.Name, entry.Cluster, StringComparison.OrdinalIgnoreCase))
++				{
++					return cluster.Servers.Any(server => server.AssumeHealthy && String.Equals(server.ServerAndPort, entry.BaseServerAndPort, StringComparison.OrdinalIgnoreCase));
++				}
++			}
++			return false;
++		}
++
+ 		internal async Task UpdateHealthTestOnlyAsync(string cluster, string serverAndPort, string? healthCheckUrl, CancellationToken cancellationToken)
+ 		{
+ 			PerforceServerEntry pse = new(serverAndPort, serverAndPort, healthCheckUrl, cluster, false, PerforceServerStatus.Unknown, null, null);
