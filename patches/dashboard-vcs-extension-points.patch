@@ -1,0 +1,38 @@
+diff --git a/Engine/Source/Programs/Horde/HordeDashboard/plugins/index.ts b/Engine/Source/Programs/Horde/HordeDashboard/plugins/index.ts
+index 5f9ccadd5..223618afc 100644
+--- a/Engine/Source/Programs/Horde/HordeDashboard/plugins/index.ts
++++ b/Engine/Source/Programs/Horde/HordeDashboard/plugins/index.ts
+@@ -8,7 +8,10 @@ import { ServerPluginInfoResponse } from "horde/backend/Api";
+ // mounting points???
+ 
+ export enum MountType {
+-   TopNav
++   // Mounts under the top navigation "Tools" menu
++   TopNav,
++   // Mounts under the "Server > Monitoring" menu (eg. a VCS provider's servers page)
++   ServerMonitoring
+ }
+ 
+ export type Mount = {
+diff --git a/Engine/Source/Programs/Horde/HordeDashboard/src/components/TopNav.tsx b/Engine/Source/Programs/Horde/HordeDashboard/src/components/TopNav.tsx
+index db47be390..7d30c48c8 100644
+--- a/Engine/Source/Programs/Horde/HordeDashboard/src/components/TopNav.tsx
++++ b/Engine/Source/Programs/Horde/HordeDashboard/src/components/TopNav.tsx
+@@ -646,6 +646,17 @@ export const TopNav: React.FC<{ suppressServer?: boolean }> = observer(({ suppre
+          });
+       }
+ 
++      // Add plugin server-monitoring mount points (eg. a VCS provider's servers page), filtered by user ACLs
++      getHordePlugins().forEach(p => {
++         getFilteredMounts(p).filter(m => m.type === MountType.ServerMonitoring).forEach(m => {
++            monitoringItems.push({
++               key: `admin_plugin_monitoring_${m.text}`,
++               text: m.text,
++               link: m.route
++            });
++         });
++      });
++
+       monitoringItems.push({
+          key: "admin_serverstatus",
+          text: "Status",

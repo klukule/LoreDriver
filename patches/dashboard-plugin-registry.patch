@@ -1,0 +1,9 @@
+diff --git a/Engine/Source/Programs/Horde/HordeDashboard/plugins/registry.ts b/Engine/Source/Programs/Horde/HordeDashboard/plugins/registry.ts
+index 68688e28e..7931bdd73 100644
+--- a/Engine/Source/Programs/Horde/HordeDashboard/plugins/registry.ts
++++ b/Engine/Source/Programs/Horde/HordeDashboard/plugins/registry.ts
+@@ -5,3 +5,4 @@ import "./analytics"
+ import "./test-automation"
+ import "./performancetrends"
+ import "./structuredanalytics"
++import "./lore"
