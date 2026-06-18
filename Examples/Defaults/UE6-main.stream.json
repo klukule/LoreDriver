@@ -1,0 +1,66 @@
+{
+  // Display name for the stream
+  "name": "UE6/main",
+
+  // Use the Lore as version control provider
+  "vcs": "Lore",
+
+  // Repository on the Lore server (exact name from `lore repository list`, including the org prefix).
+  // The server resolves commits for this repo; combined with the cluster address it is lore://localhost:41337/Epic/UE6 .
+  "repositoryName": "Epic/UE6",
+
+  // Branch to build
+  "defaultBranchName": "main",
+
+  // Tabs to display in the dashboard
+  "tabs": [
+    {
+      "title": "General",
+      "style": "Normal",
+      "templates": ["lore-build"]
+    }
+  ],
+
+  // Agent types referenced by templates, mapping to pools + workspace definitions
+  "agentTypes": {
+    "Lore": {
+      "pool": "win-ue5",
+      "workspace": "Lore"
+    },
+    // BuildGraph example nodes declare Type="Win64"; map it to the same pool + Lore workspace
+    "Win64": {
+      "pool": "win-ue5",
+      "workspace": "Lore"
+    }
+  },
+
+  // Workspace definitions. method=name=lore selects the Lore materializer in the driver.
+  "workspaceTypes": {
+    "Lore": {
+      // Arbitrary identifier for the workspace (used as a name of the folder workspace is synced to)
+      "identifier": "++UE6+Main",
+      // Repository the agent clones/syncs - must match the server repo name (forms lore://localhost:41337/Epic/UE6)
+      "stream": "Epic/UE6",
+      // AutoSDK is currently perforce only and causes issues; keep it disabled
+      "useAutoSdk": false,
+      "method": "name=lore&branch=main"
+    }
+  },
+
+  // Templates for jobs. jobOptions.driver=LoreDriver makes the agent run the Lore-capable driver.
+  "templates": [
+    {
+      "id": "lore-build",
+      "name": "Lore Build",
+      "description": "Syncs the Lore workspace and runs a simple BuildGraph target.",
+      "initialAgentType": "Lore",
+      "jobOptions": {
+        "driver": "LoreDriver"
+      },
+      "arguments": [
+        "-Script=Engine/Build/Graph/Examples/Parameters.xml",
+        "-Target=Print Parameters"
+      ]
+    }
+  ]
+}
