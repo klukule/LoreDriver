@@ -3,8 +3,7 @@
     "lore": {
       "clusters": [
         { "name": "lore-local", "serverAndPort": "lore://localhost:41337" }
-      ],
-      "streams": [{ "id": "ue6-main", "cluster": "lore-local" }]
+      ]
     }
   }
 }

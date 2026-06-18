@@ -36,17 +36,13 @@ namespace HordeServer.VersionControl.Lore
 				return;
 			}
 
-			LoreClusterConfig? cluster = _loreConfig.CurrentValue.FindClusterForStream(streamConfig.Id);
+			LoreClusterConfig? cluster = _loreConfig.CurrentValue.FindClusterForStream(streamConfig);
 			if (cluster == null)
 			{
 				return;
 			}
 
-			string? branch = _loreConfig.CurrentValue.FindStream(streamConfig.Id)?.Branch;
-			if (String.IsNullOrEmpty(branch))
-			{
-				branch = String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName;
-			}
+			string branch = String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName;
 
 			workspace.Cluster = cluster.Name;
 			workspace.ServerAndPort = cluster.ServerAndPort;

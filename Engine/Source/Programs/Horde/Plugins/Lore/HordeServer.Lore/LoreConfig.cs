@@ -2,8 +2,8 @@
 
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
-using EpicGames.Horde.Streams;
 using HordeServer.Plugins;
+using HordeServer.Streams;
 
 namespace HordeServer
 {
@@ -16,11 +16,6 @@ namespace HordeServer
 		/// Lore server clusters available to streams
 		/// </summary>
 		public List<LoreClusterConfig> Clusters { get; set; } = new List<LoreClusterConfig>();
-
-		/// <summary>
-		/// Per-stream Lore settings (which cluster a stream uses, optional branch override)
-		/// </summary>
-		public List<LoreStreamConfig> Streams { get; set; } = new List<LoreStreamConfig>();
 
 		/// <inheritdoc/>
 		public void PostLoad(PluginConfigOptions configOptions)
@@ -44,36 +39,8 @@ namespace HordeServer
 		}
 
 		/// <summary>
-		/// Finds the per-stream settings for a stream
-		/// </summary>
-		public LoreStreamConfig? FindStream(StreamId streamId) => Streams.FirstOrDefault(x => x.Id == streamId);
-
-		/// <summary>
-		/// Finds the cluster a stream is configured to use
-		/// </summary>
-		public LoreClusterConfig? FindClusterForStream(StreamId streamId) => FindCluster(FindStream(streamId)?.Cluster);
-	}
-
-	/// <summary>
-	/// Per-stream Lore settings
-	/// </summary>
-	public class LoreStreamConfig
-	{
-		/// <summary>
-		/// Stream this applies to
-		/// </summary>
-		[Required]
-		public StreamId Id { get; set; }
-
-		/// <summary>
-		/// Lore cluster the stream uses
-		/// </summary>
-		public string? Cluster { get; set; }
-
-		/// <summary>
-		/// Optional branch override (defaults to the stream's DefaultBranchName, or "main")
-		/// </summary>
-		public string? Branch { get; set; }
+		/// Finds the Lore cluster a stream uses.
+		public LoreClusterConfig? FindClusterForStream(StreamConfig streamConfig) => FindCluster(streamConfig.ClusterName) ?? Clusters.FirstOrDefault();
 	}
 
 	/// <summary>

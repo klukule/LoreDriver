@@ -1,6 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-using EpicGames.Horde.Streams;
 using HordeServer.Streams;
 using HordeServer.Utilities;
 using Microsoft.AspNetCore.Authorization;
@@ -85,17 +84,21 @@ namespace HordeServer
 			BuildConfig build = _buildConfig.Value;
 
 			List<GetLoreStreamResponse> streams = new();
-			foreach (LoreStreamConfig stream in lore.Streams)
+			foreach (StreamConfig streamConfig in build.Streams)
 			{
-				build.TryGetStream(stream.Id, out StreamConfig? streamConfig);
-				string branch = stream.Branch ?? streamConfig?.DefaultBranchName ?? "main";
+				if (!String.Equals(streamConfig.VCS, "Lore", StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
+
+				LoreClusterConfig? cluster = lore.FindClusterForStream(streamConfig);
 				streams.Add(new GetLoreStreamResponse
 				{
-					Id = stream.Id.ToString(),
-					Name = streamConfig?.Name ?? stream.Id.ToString(),
-					Cluster = stream.Cluster,
-					Branch = branch,
-					Repository = streamConfig?.RepositoryName,
+					Id = streamConfig.Id.ToString(),
+					Name = streamConfig.Name,
+					Cluster = cluster?.Name,
+					Branch = String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName,
+					Repository = streamConfig.RepositoryName,
 				});
 			}
 

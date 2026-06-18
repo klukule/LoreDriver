@@ -68,19 +68,11 @@ namespace HordeServer.VersionControl.Lore
 
 		internal GrpcChannel GetChannel(StreamConfig streamConfig)
 		{
-			LoreClusterConfig cluster = _loreConfig.CurrentValue.FindClusterForStream(streamConfig.Id) ?? throw new CommitCollectionException($"No Lore cluster configured for stream {streamConfig.Id}", null);
+			LoreClusterConfig cluster = _loreConfig.CurrentValue.FindClusterForStream(streamConfig) ?? throw new CommitCollectionException($"No Lore cluster configured for stream {streamConfig.Id}", null);
 			return _channels.GetOrAdd(cluster.ServerAndPort, addr => GrpcChannel.ForAddress(ToGrpcAddress(addr)));
 		}
 
-		internal string GetBranch(StreamConfig streamConfig)
-		{
-			string? branch = _loreConfig.CurrentValue.FindStream(streamConfig.Id)?.Branch;
-			if (!String.IsNullOrEmpty(branch))
-			{
-				return branch;
-			}
-			return String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName;
-		}
+		internal string GetBranch(StreamConfig streamConfig) => String.IsNullOrEmpty(streamConfig.DefaultBranchName) ? "main" : streamConfig.DefaultBranchName;
 
 		// lore://host:port -> http://host:port (gRPC over plaintext h2c for a no-TLS local server). Use https:// for a TLS-enabled Lore gRPC endpoint.
 		static string ToGrpcAddress(string serverAndPort)
