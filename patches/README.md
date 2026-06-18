@@ -3,32 +3,20 @@
 Small, set of patches to existing Horde source. Each patch is a plain `git diff` against a pristine Horde tree. Apply from source root:
 
 ```
-git apply patches/01-perforce-assume-healthy.patch
+git apply patches/01-perforce-decouple.patch
 ```
 
 (or `git apply --check <file>` first to dry-run). Stage them however you like.
 
-## 01-perforce-assume-healthy.patch
+## 01-perforce-decouple.patch
 
-**Goal:** let a non-Perforce (Lore) stream dispatch jobs without a real Perforce server being bound.
+**Goal:** a non-Perforce (Lore) stream dispatches jobs (and conforms) with no perforce server needed.
 
-Horde gates every job/conform dispatch on `PerforceLoadBalancer.SelectServerAsync` returning a server that passed a live `p4 info` health check. This patch adds an opt-in `AssumeHealthy` flag to a Perforce server config; when set, the health ticker marks that server `Healthy` and skips the `p4 info` probe. Files:
+Horde's dispatch built the agent workspace message via the Perforce path (`FindPerforceCluster` + `PerforceLoadBalancer.SelectServerAsync`, which requires a healthy `p4 info`). This patch makes Build skip Perforce for any workspace whose materializer isn't Perforce, deciding per-workspace from the workspace `method`:
 
-- `BuildConfig.cs` - adds `PerforceServer.AssumeHealthy` (bool).
-- `PerforceLoadBalancer.cs` - `UpdateHealthAsync` short-circuits to `Healthy` for `AssumeHealthy` servers (+ `IsAssumeHealthy` helper).
+- `PerforceWorkspace.cs` - adds `RequiresPerforce(method)` (true for no materializer name, or `Perforce`/`ManagedWorkspace`) and `AddWorkspaceMessage(workspace, messages)` (builds the agent workspace message with no server/credentials; a VCS provider plugin's `IWorkspaceMessageEnricher` fills the rest).
+- `JobTaskSource.cs` - `CreateExecuteJobTaskAsync` takes the Perforce path only when `RequiresPerforce(workspace.Method)`; otherwise builds the message via `AddWorkspaceMessage`.
 
-**NOTE:** this is a temporary solution, I am currently working on better solution that fully decouples jobs from perforce if the cluster isn't perforce cluster.
-
-**Config to use it** - point the Lore stream's placeholder cluster at any address and mark it assumed-healthy:
-
-```jsonc
-"perforceClusters": [
-  {
-    "name": "Default",
-    "servers": [ { "serverAndPort": "lore-placeholder:1666", "assumeHealthy": true } ]
-  }
-]
-```
 
 ## dashboard-vcs-extension-points.patch
 
@@ -49,6 +37,6 @@ One-line patch adding `import "./lore"` to `HordeDashboard/plugins/registry.ts`.
 
 Four existing files:
 - `conform_task.proto` - adds `ConformTask.Driver` to the conform protobuf.
-- `ConformTaskSource.cs` - adds logic to derive target Driver assembly and passes it to the conform_task protobuf.
+- `ConformTaskSource.cs` - derives the target driver assembly and sets it on the conform task; also applies the same Perforce decouple as patch 01 (uses `RequiresPerforce`/`AddWorkspaceMessage` so non-Perforce conform workspaces need no Perforce cluster/server). Depends on patch 01.
 - `ConformHandler.cs` - runs `conformTask.Driver`, defaulting to `JobDriver` when empty.
 - `ConformExecutor.cs` - routes named, non-`ManagedWorkspace` materializers (Perforce, Lore, ...) to the materializer-based conform (`ConformMaterializersAsync`) instead of the raw managed path.

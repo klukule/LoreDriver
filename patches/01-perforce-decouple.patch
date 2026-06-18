@@ -1,0 +1,123 @@
+diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs
+index 193b4539c..fc392afcc 100644
+--- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs
++++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/Jobs/JobTaskSource.cs
+@@ -1440,27 +1440,36 @@ namespace HordeServer.Jobs
+ 
+ 			List<RpcAgentWorkspace> workspaces = new();
+ 
+-			PerforceCluster? cluster = buildConfig.FindPerforceCluster(workspace.Cluster);
+-			if (cluster == null)
++			if (PerforceWorkspace.RequiresPerforce(workspace.Method))
+ 			{
+-				return null;
+-			}
++				PerforceCluster? cluster = buildConfig.FindPerforceCluster(workspace.Cluster);
++				if (cluster == null)
++				{
++					return null;
++				}
+ 
+-			if (autoSdkWorkspace != null)
+-			{
+-				autoSdkWorkspace.Method = workspace.Method;
++				if (autoSdkWorkspace != null)
++				{
++					autoSdkWorkspace.Method = workspace.Method;
++
++					if (!await agent.TryAddWorkspaceMessageAsync(autoSdkWorkspace, cluster, _perforceLoadBalancer, workspaces, cancellationToken))
++					{
++						return null;
++					}
++
++					task.AutoSdkWorkspace = workspaces.Last();
++				}
+ 
+-				if (!await agent.TryAddWorkspaceMessageAsync(autoSdkWorkspace, cluster, _perforceLoadBalancer, workspaces, cancellationToken))
++				if (!await agent.TryAddWorkspaceMessageAsync(workspace, cluster, _perforceLoadBalancer, workspaces, cancellationToken))
+ 				{
+ 					return null;
+ 				}
+-
+-				task.AutoSdkWorkspace = workspaces.Last();
+ 			}
+-
+-			if (!await agent.TryAddWorkspaceMessageAsync(workspace, cluster, _perforceLoadBalancer, workspaces, cancellationToken))
++			else
+ 			{
+-				return null;
++				// Non-Perforce VCS: no Perforce server is needed. Plugins should use enricher to fill in server address etc.
++				workspace.AddWorkspaceMessage(workspaces);
+ 			}
+ 
+ 			task.Workspace = workspaces.Last();
+diff --git a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs
+index fbcb0a768..f44239c80 100644
+--- a/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs
++++ b/Engine/Source/Programs/Horde/Plugins/Build/HordeServer.Build/VersionControl/Perforce/PerforceWorkspace.cs
+@@ -141,6 +141,65 @@ namespace HordeServer.VersionControl.Perforce
+ 			return true;
+ 		}
+ 
++		/// <summary>
++		/// Whether a workspace needs a Perforce server, based on its materializer.
++		/// Workspaces with no materializer name, or the built-in Perforce / ManagedWorkspace materializers, are Perforce-backed. 
++		/// Any other named materializer (eg. a non-Perforce VCS provider) does not need Perforce.
++		/// </summary>
++		public static bool RequiresPerforce(string? method)
++		{
++			string? name = GetMaterializerName(method);
++			return String.IsNullOrEmpty(name)
++				|| name.Equals("Perforce", StringComparison.OrdinalIgnoreCase)
++				|| name.Equals("ManagedWorkspace", StringComparison.OrdinalIgnoreCase);
++		}
++
++		/// <summary>
++		/// Adds an agent workspace message for a non-Perforce VCS - no Perforce server selection or credentials.
++		/// A registered IWorkspaceMessageEnricher (from the VCS provider plugin) fills in the provider-specific fields.
++		/// </summary>
++		public static void AddWorkspaceMessage(this AgentWorkspaceInfo workspace, IList<RpcAgentWorkspace> workspaceMessages)
++		{
++			RpcAgentWorkspace result = new RpcAgentWorkspace
++			{
++				ConfiguredCluster = workspace.Cluster,
++				ConfiguredUserName = workspace.UserName,
++				Cluster = workspace.Cluster ?? String.Empty,
++				UserName = workspace.UserName,
++				Identifier = workspace.Identifier,
++				Stream = workspace.Stream,
++				Incremental = workspace.Incremental,
++				Method = workspace.Method ?? String.Empty,
++				MinScratchSpace = workspace.MinScratchSpace ?? 0,
++				ConformDiskFreeSpace = workspace.ConformDiskFreeSpace ?? 0,
++			};
++
++			if (workspace.View != null)
++			{
++				result.View.AddRange(workspace.View);
++			}
++
++			workspaceMessages.Add(result);
++		}
++
++		// Parses the "name" materializer key out of a workspace method query string (eg. "name=lore&branch=main").
++		static string? GetMaterializerName(string? method)
++		{
++			if (String.IsNullOrEmpty(method))
++			{
++				return null;
++			}
++			foreach (string pair in method.Split('&', StringSplitOptions.RemoveEmptyEntries))
++			{
++				int equals = pair.IndexOf('=', StringComparison.Ordinal);
++				if (equals > 0 && pair[..equals].Trim().Equals("name", StringComparison.OrdinalIgnoreCase))
++				{
++					return pair[(equals + 1)..].Trim();
++				}
++			}
++			return null;
++		}
++
+ 		/// <summary>
+ 		/// Tries to get an agent workspace definition from the given type name
+ 		/// </summary>
