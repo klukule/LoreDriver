@@ -242,21 +242,25 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 	{
 		using TelemetrySpan span = _tracer.StartActiveSpan($"{nameof(LoreMaterializer)}.{nameof(ConformAsync)}");
 
-		if (removeUntrackedFiles || !IsValidLoreWorkspace())
+		if (!IsValidLoreWorkspace())
 		{
-			// Full conform, or no valid checkout: clean slate. The next sync re-materializes the workspace.
-			_logger.LogInformation("Conforming Lore workspace {Dir} (full clean)", SyncDir.FullName);
-			if (DirectoryReference.Exists(SyncDir))
-			{
-				FileUtils.ForceDeleteDirectory(SyncDir, usePosixFallback: true, _logger);
-			}
-			FileUtils.ForceDeleteFile(_stateFile);
+			// Nothing to conform - the next sync clones the workspace fresh (with the server-provided revision).
+			_logger.LogInformation("No Lore workspace at {Dir}; nothing to conform", SyncDir.FullName);
 			return;
 		}
 
-		// Incremental conform: reset the existing checkout, discarding local changes and untracked files.
-		_logger.LogInformation("Removing untracked files from Lore workspace.");
 		using LoreGlobalArgs global = CreateGlobalArgs();
+
+		if (removeUntrackedFiles)
+		{
+			// Full conform: verify and heal repository content before resetting (like a clean Perforce sync).
+			_logger.LogInformation("Full conform: verifying and healing Lore workspace {Dir}", SyncDir.FullName);
+			using LoreRepositoryVerifyStateArgs verifyArgs = new() { Heal = true };
+			Check("conform verify", await Lore.RepositoryVerifyState(global, verifyArgs).WaitAsync());
+		}
+
+		// Reset the working tree to the synced revision(discarding local modifications).
+		_logger.LogInformation("Conforming Lore workspace {Dir} (reset, full={Full})", SyncDir.FullName, removeUntrackedFiles);
 		using LoreRevisionSyncArgs resetArgs = new() { Reset = true };
 		Check("conform reset", await Lore.RevisionSync(global, resetArgs).WaitAsync());
 	}
