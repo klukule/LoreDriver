@@ -8,13 +8,8 @@
 ## What works
 
 - A Lore stream resolves commit metadata over gRPC.
-- A job dispatches to an agent, the agent syncs the Lore workspace to given revision, and BuildGraph runs to completion.
-
-## What's broken / not done yet
-
-- **Conforms.** Conform tasks are disabled in the demo (`EnableConformTasks: false`) to avoid a Perforce-only code path; agents show "Pending Conform".
-- **Dashboard.** Lore workspaces and Lore clusters don't show in the dashboard (those panels are built from Perforce config).
-- **Dispatch rides the Perforce path.** Horde gates job dispatch on a healthy Perforce cluster, so a Lore stream must point at a real (reachable) Perforce server purely to pass the `p4 info` health check - the enricher overwrites the address at runtime. See config below.
+- A job dispatches to an agent, the agent syncs the Lore workspace to a given revision, and BuildGraph runs to completion.
+- Conforms (incremental and full). Incremental resets the workspace to the synced revision; full verifies + heals (re-fetch/repair) then resets.
 
 ## Untested
 
@@ -28,13 +23,17 @@
    <ProjectReference Include="..\Plugins\Lore\HordeServer.Lore\HordeServer.Lore.csproj" />
    ```
 3. Add to the solution - add `Plugins/Lore/HordeServer.Lore/HordeServer.Lore.csproj` and `Drivers/LoreDriver/LoreDriver.csproj` to `Horde.sln`.
+4. Apply the Horde patches in `patches/` (small edits to existing Horde files - see `patches/README.md`):
+   - `01-perforce-decouple.patch` - dispatch a job for a non-Perforce stream with no Perforce cluster present.
+   - `02-lore-conform.patch` - route conform to the stream's configured driver and run the materializer conform path.
+   - `dashboard-vcs-extension-points.patch` + `dashboard-plugin-registry.patch` - generic dashboard mount points the Lore dashboard plugin hooks into.
 
 ## Configure (see `Examples/`)
 
 - Enable the plugin - `Examples/appsettings.json`.
-- Add the `lore` plugin config and a `Default` Perforce cluster for the dispatch health check - `Examples/globals.plugins.json`.
+- Add the `lore` plugin config - `Examples/globals.plugins.json`.
 - Example stream/project (`vcs: "Lore"`, template with `jobOptions.driver: "LoreDriver"`) - `Examples/Defaults/`.
 
-Make sure to deploy (or have deployed) the `LoreDriver` into the `LoreDriver/LoreDriver.dll` next to the HordeAgent executable (the agent runs `<driverName>/<driverName>.dll`) - see base JobDriver for reference.
+Make sure to deploy (or have deployed) the `LoreDriver` into `LoreDriver/LoreDriver.dll` next to the HordeAgent executable (the agent runs `<driverName>/<driverName>.dll`) - see the base JobDriver for reference.
 
-NOTE: Server-side plugin uses raw protobufs - copied from <https://github.com/EpicGames/lore/tree/main/lore-proto/proto/lore> - to access the low-level gRPC API directly instead of the Lore SDK
+NOTE: The server-side plugin uses raw protobufs copied from <https://github.com/EpicGames/lore/tree/main/lore-proto/proto/lore> to access the low-level gRPC API directly instead of the Lore SDK.
