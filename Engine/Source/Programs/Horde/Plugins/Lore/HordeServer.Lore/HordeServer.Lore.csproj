@@ -23,6 +23,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Lore auth API -->
+    <Protobuf Include="Protos\epic_urc\auth_api.proto" ProtoRoot="Protos" GrpcServices="Client" />
     <!-- Lore server gRPC API -->
     <Protobuf Include="Protos\lore\model\v1\model.proto" ProtoRoot="Protos" GrpcServices="None" />
     <Protobuf Include="Protos\lore\thin_client\v1\model.proto" ProtoRoot="Protos" GrpcServices="None" />

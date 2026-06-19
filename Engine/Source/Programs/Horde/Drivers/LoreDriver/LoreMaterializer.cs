@@ -94,7 +94,7 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 	internal record State(int Version, TransactionStatus Status, string Identifier, string RepositoryUrl, string Branch, string? Revision, string? ViewHash);
 
 	private const string LoreMetadataDir = ".lore";
-	private const string TokenTypeApiKey = "apikey";
+	private const string DefaultTokenType = "api-key";
 
 	/// <inheritdoc/>
 	public DirectoryReference SyncDir { get; }
@@ -283,17 +283,20 @@ public sealed class LoreMaterializer : IWorkspaceMaterializer
 		string? token = _options.AgentWorkspace.Ticket;
 		if (String.IsNullOrEmpty(token))
 		{
-			token = _options.AgentWorkspace.Password;
-		}
-		if (String.IsNullOrEmpty(token))
-		{
 			return;
+		}
+
+		// Reusing Username for token type
+		string tokenType = _options.AgentWorkspace.UserName ?? String.Empty;
+		if (String.IsNullOrEmpty(tokenType))
+		{
+			tokenType = DefaultTokenType;
 		}
 
 		using LoreAuthLoginWithTokenArgs loginArgs = new()
 		{
 			Token = token,
-			TokenType = TokenTypeApiKey,
+			TokenType = tokenType,
 			RemoteUrl = NormalizeServerUrl(_options.AgentWorkspace.ServerAndPort ?? String.Empty),
 		};
 		Check("auth login", await Lore.AuthLoginWithToken(global, loginArgs).WaitAsync());

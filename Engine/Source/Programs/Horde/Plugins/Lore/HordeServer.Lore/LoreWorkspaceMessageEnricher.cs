@@ -50,9 +50,9 @@ namespace HordeServer.VersionControl.Lore
 			workspace.Stream = streamConfig.RepositoryName ?? streamConfig.Name;
 			workspace.Method = LoreUtils.GetWorkspaceMethod(branch);
 
+			// Reuse the agent-workspace credential fields: UserName carries the Lore token type, Ticket the token.
 			LoreCredentials? credentials = cluster.Credentials.FirstOrDefault();
-			workspace.UserName = credentials?.UserName;
-			workspace.Password = credentials?.Password;
+			workspace.UserName = credentials?.TokenType;
 			workspace.Ticket = credentials?.Ticket;
 
 			// We need both the numeric ID and the hash since Lore actually syncs based on the hash, but numeric IDs are used for other things in Horde. (so resolve ID to hash)

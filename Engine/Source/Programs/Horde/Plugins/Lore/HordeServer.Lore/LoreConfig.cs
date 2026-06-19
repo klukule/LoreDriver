@@ -61,28 +61,28 @@ namespace HordeServer
 		public string ServerAndPort { get; set; } = String.Empty;
 
 		/// <summary>
+		/// Address of the Lore auth server used to exchange credential tokens for user tokens (eg. https://host:port)
+		/// </summary>
+		public string? AuthUrl { get; set; }
+
+		/// <summary>
 		/// Server credentials
 		/// </summary>
 		public List<LoreCredentials> Credentials { get; set; } = new List<LoreCredentials>();
 	}
 
 	/// <summary>
-	/// Credentials for a Lore user
+	/// Credentials used to authenticate with a Lore server
 	/// </summary>
 	public class LoreCredentials
 	{
 		/// <summary>
-		/// The username
+		/// Token type passed to the Lore login (eg. "api-key" for an API token)
 		/// </summary>
-		public string UserName { get; set; } = String.Empty;
+		public string TokenType { get; set; } = "api-key";
 
 		/// <summary>
-		/// Password for the user
-		/// </summary>
-		public string? Password { get; set; }
-
-		/// <summary>
-		/// Login ticket for the user (used instead of password if set)
+		/// Token (API key / login ticket) used to authenticate
 		/// </summary>
 		public string? Ticket { get; set; }
 	}

@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using ByteString = Google.Protobuf.ByteString;
+using LoreAuth = global::EpicUrc;
 using LoreModelV1 = global::Lore.Model.V1;
 using LoreRepositoryV1 = global::Lore.Repository.V1;
 using LoreRevisionV1 = global::Lore.Revision.V1;
@@ -31,6 +32,9 @@ namespace HordeServer.VersionControl.Lore
 		readonly IOptionsMonitor<LoreConfig> _loreConfig;
 		readonly ILogger _logger;
 		readonly ConcurrentDictionary<string, GrpcChannel> _channels = new(StringComparer.OrdinalIgnoreCase);
+		readonly ConcurrentDictionary<string, GrpcChannel> _authChannels = new(StringComparer.OrdinalIgnoreCase);
+		readonly SemaphoreSlim _tokenLock = new(1, 1);
+		readonly Dictionary<string, (string Token, long ExpiresAt)> _tokens = new(StringComparer.OrdinalIgnoreCase);
 
 		/// <inheritdoc/>
 		public string Name => LoreUtils.VcsName;
@@ -69,7 +73,63 @@ namespace HordeServer.VersionControl.Lore
 		internal GrpcChannel GetChannel(StreamConfig streamConfig)
 		{
 			LoreClusterConfig cluster = _loreConfig.CurrentValue.FindClusterForStream(streamConfig) ?? throw new CommitCollectionException($"No Lore cluster configured for stream {streamConfig.Id}", null);
-			return _channels.GetOrAdd(cluster.ServerAndPort, addr => GrpcChannel.ForAddress(ToGrpcAddress(addr)));
+			return _channels.GetOrAdd(cluster.ServerAndPort, _ => CreateChannel(cluster));
+		}
+
+		// Create authenticated gRPC channel
+		GrpcChannel CreateChannel(LoreClusterConfig cluster)
+		{
+			GrpcChannelOptions options = new();
+			if (cluster.Credentials.Count > 0 && !String.IsNullOrEmpty(cluster.AuthUrl))
+			{
+				CallCredentials callCredentials = CallCredentials.FromInterceptor(async (context, metadata) =>
+				{
+					string? token = await GetUserTokenAsync(cluster, context.CancellationToken);
+					if (!String.IsNullOrEmpty(token))
+					{
+						metadata.Add("Authorization", $"Bearer {token}");
+					}
+				});
+				options.Credentials = ChannelCredentials.Create(ChannelCredentials.Insecure, callCredentials);
+				options.UnsafeUseInsecureChannelCallCredentials = true;
+			}
+			return GrpcChannel.ForAddress(ToGrpcAddress(cluster.ServerAndPort), options);
+		}
+
+		async Task<string?> GetUserTokenAsync(LoreClusterConfig cluster, CancellationToken cancellationToken)
+		{
+			LoreCredentials? credentials = cluster.Credentials.FirstOrDefault();
+			if (credentials == null || String.IsNullOrEmpty(credentials.Ticket) || String.IsNullOrEmpty(cluster.AuthUrl))
+			{
+				return null;
+			}
+
+			long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+			await _tokenLock.WaitAsync(cancellationToken);
+			try
+			{
+				if (_tokens.TryGetValue(cluster.Name, out (string Token, long ExpiresAt) cached) && cached.ExpiresAt - 60 > now)
+				{
+					return cached.Token;
+				}
+
+				LoreAuth.UrcAuthApi.UrcAuthApiClient client = new(_authChannels.GetOrAdd(cluster.AuthUrl, addr => GrpcChannel.ForAddress(addr)));
+				LoreAuth.ExchangeExternalTokenForUserTokenResponse response = await client.ExchangeExternalTokenForUserTokenAsync(
+					new LoreAuth.ExchangeExternalTokenForUserTokenRequest { ExternalToken = credentials.Ticket, TokenType = credentials.TokenType },
+					cancellationToken: cancellationToken);
+				if (response.UserToken == null || String.IsNullOrEmpty(response.UserToken.UserToken_))
+				{
+					_logger.LogError("Lore token exchange returned no user token for cluster {Cluster} (tokenType {TokenType})", cluster.Name, credentials.TokenType);
+					return null;
+				}
+
+				_tokens[cluster.Name] = (response.UserToken.UserToken_, response.UserToken.ExpiresAt);
+				return response.UserToken.UserToken_;
+			}
+			finally
+			{
+				_tokenLock.Release();
+			}
 		}
 
 		// lore://host:port -> http://host:port (gRPC over plaintext h2c for a no-TLS local server). Use https:// for a TLS-enabled Lore gRPC endpoint.
@@ -127,8 +187,8 @@ namespace HordeServer.VersionControl.Lore
 			{
 				if (_headers == null)
 				{
-					LoreRepositoryV1.RepositoryGetResponse response = await _repositories.RepositoryGetAsync(new LoreRepositoryV1.RepositoryGetRequest { Name = RepositoryName }, cancellationToken: cancellationToken);
-					_headers = new Metadata { { RepositoryIdKey, response.Repository.Id.ToByteArray() } };
+					ByteString id = await ResolveRepositoryIdAsync(cancellationToken);
+					_headers = new Metadata { { RepositoryIdKey, id.ToByteArray() } };
 				}
 			}
 			finally
@@ -136,6 +196,19 @@ namespace HordeServer.VersionControl.Lore
 				_headerLock.Release();
 			}
 			return _headers;
+		}
+
+		async Task<ByteString> ResolveRepositoryIdAsync(CancellationToken cancellationToken)
+		{
+			using AsyncServerStreamingCall<LoreRepositoryV1.RepositoryListResponse> call = _repositories.RepositoryList(new LoreRepositoryV1.RepositoryListRequest(), cancellationToken: cancellationToken);
+			await foreach (LoreRepositoryV1.RepositoryListResponse response in call.ResponseStream.ReadAllAsync(cancellationToken))
+			{
+				if (String.Equals(response.Repository.Name, RepositoryName, StringComparison.Ordinal))
+				{
+					return response.Repository.Id;
+				}
+			}
+			throw new CommitCollectionException($"Lore repository '{RepositoryName}' not found on the server", null);
 		}
 
 		/// <inheritdoc/>

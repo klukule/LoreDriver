@@ -2,7 +2,14 @@
   "plugins": {
     "lore": {
       "clusters": [
-        { "name": "lore-local", "serverAndPort": "lore://localhost:41337" }
+        {
+          "name": "lore-local",
+          "serverAndPort": "lore://localhost:41337",
+          "authUrl": "https://localhost:9443",
+          "credentials": [
+            { "tokenType": "api-key", "ticket": "lore_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }
+          ]
+        }
       ]
     }
   }
